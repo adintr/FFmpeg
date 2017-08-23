@@ -3072,6 +3072,12 @@ static void rtsp_cmd_describe(HTTPContext *c, const char *url)
     if (*path == '/')
         path++;
 
+	char* argsep = strstr(path, "?");
+	if (argsep != NULL)
+	{
+		*argsep = 0;
+	}
+
     for(stream = config.first_stream; stream; stream = stream->next) {
         if (!stream->is_feed &&
             stream->fmt && !strcmp(stream->fmt->name, "rtp") &&
@@ -3138,6 +3144,7 @@ static void rtsp_cmd_setup(HTTPContext *c, const char *url,
     int stream_index, rtp_port, rtcp_port;
     char buf[1024];
     char path1[1024];
+	char infoarg[1024];
     const char *path;
     HTTPContext *rtp_c;
     RTSPTransportField *th;
@@ -3149,6 +3156,14 @@ static void rtsp_cmd_setup(HTTPContext *c, const char *url,
     path = path1;
     if (*path == '/')
         path++;
+
+	char* argsep = strstr(path, "?");
+	infoarg[0] = 0;
+	if (argsep != NULL)
+	{
+		strcpy(infoarg, argsep);
+		*argsep = 0;
+	}
 
     /* now check each stream */
     for(stream = config.first_stream; stream; stream = stream->next) {
@@ -3208,7 +3223,7 @@ static void rtsp_cmd_setup(HTTPContext *c, const char *url,
         }
 
         /* open input stream */
-        if (open_input_stream(rtp_c, "") < 0) {
+        if (open_input_stream(rtp_c, infoarg) < 0) {
             rtsp_reply_error(c, RTSP_STATUS_INTERNAL);
             return;
         }
@@ -3298,6 +3313,13 @@ static HTTPContext *find_rtp_session_with_url(const char *url,
     path = path1;
     if (*path == '/')
         path++;
+
+	char* argsep = strstr(path, "?");
+	if (argsep != NULL)
+	{
+		*argsep = 0;
+	}
+
     if(!strcmp(path, rtp_c->stream->filename)) return rtp_c;
     for(s=0; s<rtp_c->stream->nb_streams; ++s) {
       snprintf(buf, sizeof(buf), "%s/streamid=%d",
