@@ -2170,20 +2170,44 @@ static int open_output_file(OptionsContext *o, const char *filename)
             print_error(filename, err);
             exit_program(1);
         }
+		
         for(j = nb_output_streams - oc->nb_streams; j < nb_output_streams; j++) {
             ost = output_streams[j];
-            for (i = 0; i < nb_input_streams; i++) {
-                ist = input_streams[i];
-                if(ist->st->codecpar->codec_type == ost->st->codecpar->codec_type){
-                    ost->sync_ist= ist;
-                    ost->source_index= i;
-                    if(ost->st->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) ost->avfilter = av_strdup("anull");
-                    if(ost->st->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) ost->avfilter = av_strdup("null");
-                    ist->discard = 0;
-                    ist->st->discard = ist->user_set_discard;
-                    break;
-                }
-            }
+
+			for (i = 0; i < o->nb_stream_maps; i++) {
+				StreamMap *map = &o->stream_maps[i];
+
+				if (map->disabled)
+					continue;
+
+				ist = input_streams[map->file_index];
+				int src_idx = input_files[map->file_index]->ist_index + map->stream_index;
+				ost->sync_ist = ist;
+				ost->source_index = src_idx;
+
+				if (ost->st->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) ost->avfilter = av_strdup("anull");
+				if (ost->st->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) ost->avfilter = av_strdup("null");
+				ist->discard = 0;
+				ist->st->discard = ist->user_set_discard;
+				break;
+			}
+
+			if (ost->source_index == -1)
+			{
+				for (i = 0; i < nb_input_streams; i++) {
+					ist = input_streams[i];
+					if (ist->st->codecpar->codec_type == ost->st->codecpar->codec_type) {
+						ost->sync_ist = ist;
+						ost->source_index = i;
+						if (ost->st->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) ost->avfilter = av_strdup("anull");
+						if (ost->st->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) ost->avfilter = av_strdup("null");
+						ist->discard = 0;
+						ist->st->discard = ist->user_set_discard;
+						break;
+					}
+				}
+			}
+
             if(!ost->sync_ist){
                 av_log(NULL, AV_LOG_FATAL, "Missing %s stream which is required by this ffm\n", av_get_media_type_string(ost->st->codecpar->codec_type));
                 exit_program(1);
