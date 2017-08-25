@@ -3163,6 +3163,13 @@ static void rtsp_cmd_setup(HTTPContext *c, const char *url,
 	{
 		strcpy(infoarg, argsep);
 		*argsep = 0;
+
+		char* streamPath = strstr(infoarg, "/streamid=");
+		if (streamPath != NULL)
+		{
+			strcat(path, streamPath);
+			*streamPath = 0;
+		}
 	}
 
     /* now check each stream */
