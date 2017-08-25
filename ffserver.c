@@ -86,6 +86,8 @@ enum HTTPState {
     RTSPSTATE_WAIT_REQUEST,
     RTSPSTATE_SEND_REPLY,
     RTSPSTATE_SEND_PACKET,
+
+	HTTPSTATE_WAIT_CLOSE,
 };
 
 static const char * const http_state[] = {
@@ -102,6 +104,8 @@ static const char * const http_state[] = {
     "RTSP_WAIT_REQUEST",
     "RTSP_SEND_REPLY",
     "RTSP_SEND_PACKET",
+
+	"WAIT_CLOSE",
 };
 
 #define IOBUFFER_INIT_SIZE 8192
@@ -186,6 +190,8 @@ typedef struct HTTPContext {
     /* RTP/TCP specific */
     struct HTTPContext *rtsp_c;
     uint8_t *packet_buffer, *packet_buffer_ptr, *packet_buffer_end;
+
+	struct HTTPContext *rtp_trans_c;
 } HTTPContext;
 
 static HTTPContext *first_http_ctx;
@@ -912,11 +918,19 @@ static void close_connection(HTTPContext *c)
     for(c1 = first_http_ctx; c1; c1 = c1->next) {
         if (c1->rtsp_c == c)
             c1->rtsp_c = NULL;
+		if (c1->rtp_trans_c == c)
+			c1->rtp_trans_c = NULL;
     }
 
     /* remove connection associated resources */
     if (c->fd >= 0)
         closesocket(c->fd);
+
+	if (c->rtp_trans_c != NULL)
+	{
+		c->rtp_trans_c->state = HTTPSTATE_WAIT_CLOSE;
+	}
+
     if (c->fmt_in) {
         /* close each frame parser */
         for(i=0;i<c->fmt_in->nb_streams;i++) {
@@ -3212,15 +3226,15 @@ static void rtsp_cmd_setup(HTTPContext *c, const char *url,
     /* find RTP session, and create it if none found */
     rtp_c = find_rtp_session(h->session_id);
     if (!rtp_c) {
-        /* always prefer UDP */
-        th = find_transport(h, RTSP_LOWER_TRANSPORT_UDP);
-        if (!th) {
-            th = find_transport(h, RTSP_LOWER_TRANSPORT_TCP);
-            if (!th) {
-                rtsp_reply_error(c, RTSP_STATUS_TRANSPORT);
-                return;
-            }
-        }
+		/* always prefer UDP */
+		th = find_transport(h, RTSP_LOWER_TRANSPORT_UDP);
+		if (!th) {
+			th = find_transport(h, RTSP_LOWER_TRANSPORT_TCP);
+			if (!th) {
+				rtsp_reply_error(c, RTSP_STATUS_TRANSPORT);
+				return;
+			}
+		}
 
         rtp_c = rtp_new_connection(&c->from_addr, stream, h->session_id,
                                    th->lower_transport);
@@ -3234,6 +3248,8 @@ static void rtsp_cmd_setup(HTTPContext *c, const char *url,
             rtsp_reply_error(c, RTSP_STATUS_INTERNAL);
             return;
         }
+
+		c->rtp_trans_c = rtp_c;
     }
 
     /* test if stream is OK (test needed because several SETUP needs
