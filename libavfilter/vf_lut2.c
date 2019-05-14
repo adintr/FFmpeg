@@ -28,7 +28,7 @@
 #include "formats.h"
 #include "internal.h"
 #include "video.h"
-#include "framesync2.h"
+#include "framesync.h"
 
 static const char *const var_names[] = {
     "w",        ///< width of the input video
@@ -52,6 +52,7 @@ enum var_name {
 
 typedef struct LUT2Context {
     const AVClass *class;
+    FFFrameSync fs;
 
     char   *comp_expr_str[4];
 
@@ -66,7 +67,6 @@ typedef struct LUT2Context {
 
     void (*lut2)(struct LUT2Context *s, AVFrame *dst, AVFrame *srcx, AVFrame *srcy);
 
-    FFFrameSync fs;
 } LUT2Context;
 
 #define OFFSET(x) offsetof(LUT2Context, x)
@@ -85,6 +85,7 @@ static av_cold void uninit(AVFilterContext *ctx)
     LUT2Context *s = ctx->priv;
     int i;
 
+    ff_framesync_uninit(&s->fs);
     av_frame_free(&s->prev_frame);
 
     for (i = 0; i < 4; i++) {
@@ -212,14 +213,14 @@ static int process_frame(FFFrameSync *fs)
     AVFilterContext *ctx = fs->parent;
     LUT2Context *s = fs->opaque;
     AVFilterLink *outlink = ctx->outputs[0];
-    AVFrame *out, *srcx, *srcy;
+    AVFrame *out, *srcx = NULL, *srcy = NULL;
     int ret;
 
-    if ((ret = ff_framesync2_get_frame(&s->fs, 0, &srcx, 0)) < 0 ||
-        (ret = ff_framesync2_get_frame(&s->fs, 1, &srcy, 0)) < 0)
+    if ((ret = ff_framesync_get_frame(&s->fs, 0, &srcx, 0)) < 0 ||
+        (ret = ff_framesync_get_frame(&s->fs, 1, &srcy, 0)) < 0)
         return ret;
 
-    if (ctx->is_disabled) {
+    if (ctx->is_disabled || !srcy) {
         out = av_frame_clone(srcx);
         if (!out)
             return AVERROR(ENOMEM);
@@ -303,20 +304,13 @@ static int lut2_config_output(AVFilterLink *outlink)
         av_log(ctx, AV_LOG_ERROR, "inputs must be of same pixel format\n");
         return AVERROR(EINVAL);
     }
-    if (srcx->w                       != srcy->w ||
-        srcx->h                       != srcy->h ||
-        srcx->sample_aspect_ratio.num != srcy->sample_aspect_ratio.num ||
-        srcx->sample_aspect_ratio.den != srcy->sample_aspect_ratio.den) {
+    if (srcx->w != srcy->w || srcx->h != srcy->h) {
         av_log(ctx, AV_LOG_ERROR, "First input link %s parameters "
-               "(size %dx%d, SAR %d:%d) do not match the corresponding "
-               "second input link %s parameters (%dx%d, SAR %d:%d)\n",
+               "(size %dx%d) do not match the corresponding "
+               "second input link %s parameters (size %dx%d)\n",
                ctx->input_pads[0].name, srcx->w, srcx->h,
-               srcx->sample_aspect_ratio.num,
-               srcx->sample_aspect_ratio.den,
                ctx->input_pads[1].name,
-               srcy->w, srcy->h,
-               srcy->sample_aspect_ratio.num,
-               srcy->sample_aspect_ratio.den);
+               srcy->w, srcy->h);
         return AVERROR(EINVAL);
     }
 
@@ -326,13 +320,13 @@ static int lut2_config_output(AVFilterLink *outlink)
     outlink->sample_aspect_ratio = srcx->sample_aspect_ratio;
     outlink->frame_rate = srcx->frame_rate;
 
-    if ((ret = ff_framesync2_init(&s->fs, ctx, 2)) < 0)
+    if ((ret = ff_framesync_init(&s->fs, ctx, 2)) < 0)
         return ret;
 
     in = s->fs.in;
     in[0].time_base = srcx->time_base;
     in[1].time_base = srcy->time_base;
-    in[0].sync   = 1;
+    in[0].sync   = 2;
     in[0].before = EXT_STOP;
     in[0].after  = EXT_INFINITY;
     in[1].sync   = 1;
@@ -344,13 +338,13 @@ static int lut2_config_output(AVFilterLink *outlink)
     if ((ret = config_output(outlink)) < 0)
         return ret;
 
-    return ff_framesync2_configure(&s->fs);
+    return ff_framesync_configure(&s->fs);
 }
 
 static int activate(AVFilterContext *ctx)
 {
     LUT2Context *s = ctx->priv;
-    return ff_framesync2_activate(&s->fs);
+    return ff_framesync_activate(&s->fs);
 }
 
 static const AVFilterPad inputs[] = {
@@ -378,11 +372,12 @@ static const AVFilterPad outputs[] = {
 
 #define lut2_options options
 
-AVFILTER_DEFINE_CLASS(lut2);
+FRAMESYNC_DEFINE_CLASS(lut2, LUT2Context, fs);
 
 AVFilter ff_vf_lut2 = {
     .name          = "lut2",
     .description   = NULL_IF_CONFIG_SMALL("Compute and apply a lookup table from two video inputs."),
+    .preinit       = lut2_framesync_preinit,
     .priv_size     = sizeof(LUT2Context),
     .priv_class    = &lut2_class,
     .uninit        = uninit,
@@ -406,18 +401,26 @@ static av_cold int init(AVFilterContext *ctx)
 
 static int tlut2_filter_frame(AVFilterLink *inlink, AVFrame *frame)
 {
-    LUT2Context *s = inlink->dst->priv;
-    AVFilterLink *outlink = inlink->dst->outputs[0];
+    AVFilterContext *ctx = inlink->dst;
+    LUT2Context *s = ctx->priv;
+    AVFilterLink *outlink = ctx->outputs[0];
 
     if (s->prev_frame) {
-        AVFrame *out = ff_get_video_buffer(outlink, outlink->w, outlink->h);
-        if (!out) {
-            av_frame_free(&s->prev_frame);
-            s->prev_frame = frame;
-            return AVERROR(ENOMEM);
+        AVFrame *out;
+
+        if (ctx->is_disabled) {
+            out = av_frame_clone(frame);
+        } else {
+            out = ff_get_video_buffer(outlink, outlink->w, outlink->h);
+            if (!out) {
+                av_frame_free(&s->prev_frame);
+                s->prev_frame = frame;
+                return AVERROR(ENOMEM);
+            }
+
+            av_frame_copy_props(out, frame);
+            s->lut2(s, out, frame, s->prev_frame);
         }
-        av_frame_copy_props(out, frame);
-        s->lut2(s, out, frame, s->prev_frame);
         av_frame_free(&s->prev_frame);
         s->prev_frame = frame;
         return ff_filter_frame(outlink, out);
@@ -459,6 +462,7 @@ AVFilter ff_vf_tlut2 = {
     .uninit        = uninit,
     .inputs        = tlut2_inputs,
     .outputs       = tlut2_outputs,
+    .flags         = AVFILTER_FLAG_SUPPORT_TIMELINE_INTERNAL,
 };
 
 #endif

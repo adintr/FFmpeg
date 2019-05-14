@@ -455,8 +455,8 @@ static const AVOption pixscope_options[] = {
     { "w",  "set scope width",     POFFSET(w),    AV_OPT_TYPE_INT,   {.i64=7},   1, 80, FLAGS },
     { "h",  "set scope height",    POFFSET(h),    AV_OPT_TYPE_INT,   {.i64=7},   1, 80, FLAGS },
     { "o",  "set window opacity",  POFFSET(o),    AV_OPT_TYPE_FLOAT, {.dbl=0.5}, 0,  1, FLAGS },
-    { "wx", "set window x offset", POFFSET(wx),   AV_OPT_TYPE_FLOAT, {.dbl=1},   0,  1, FLAGS },
-    { "wy", "set window y offset", POFFSET(wy),   AV_OPT_TYPE_FLOAT, {.dbl=0},   0,  1, FLAGS },
+    { "wx", "set window x offset", POFFSET(wx),   AV_OPT_TYPE_FLOAT, {.dbl=-1}, -1,  1, FLAGS },
+    { "wy", "set window y offset", POFFSET(wy),   AV_OPT_TYPE_FLOAT, {.dbl=-1}, -1,  1, FLAGS },
     { NULL }
 };
 
@@ -506,7 +506,7 @@ static int pixscope_config_input(AVFilterLink *inlink)
     }
 
     s->ww = 300;
-    s->wh = 300 * 1.6180;
+    s->wh = 300 * 1.6;
     s->x = s->xpos * (inlink->w - 1);
     s->y = s->ypos * (inlink->h - 1);
     if (s->x + s->w >= inlink->w || s->y + s->h >= inlink->h) {
@@ -542,8 +542,30 @@ static int pixscope_filter_frame(AVFilterLink *inlink, AVFrame *in)
     w = s->ww / s->w;
     h = s->ww / s->h;
 
-    X = (in->width - s->ww) * s->wx;
-    Y = (in->height - s->wh) * s->wy;
+    if (s->wx >= 0) {
+        X = (in->width - s->ww) * s->wx;
+    } else {
+        X = (in->width - s->ww) * -s->wx;
+    }
+    if (s->wy >= 0) {
+        Y = (in->height - s->wh) * s->wy;
+    } else {
+        Y = (in->height - s->wh) * -s->wy;
+    }
+
+    if (s->wx < 0) {
+        if (s->x + s->w >= X && (s->x + s->w <= X + s->ww) &&
+            s->y + s->h >= Y && (s->y + s->h <= Y + s->wh)) {
+            X = (in->width - s->ww) * (1 + s->wx);
+        }
+    }
+
+    if (s->wy < 0) {
+        if (s->x + s->w >= X && (s->x + s->w <= X + s->ww) &&
+            s->y + s->h >= Y && (s->y + s->h <= Y + s->wh)) {
+            Y = (in->height - s->wh) * (1 + s->wy);
+        }
+    }
 
     ff_blend_rectangle(&s->draw, &s->dark, out->data, out->linesize,
                        out->width, out->height,
@@ -646,6 +668,7 @@ AVFilter ff_vf_pixscope = {
     .query_formats = query_formats,
     .inputs        = pixscope_inputs,
     .outputs       = pixscope_outputs,
+    .flags         = AVFILTER_FLAG_SUPPORT_TIMELINE_GENERIC,
 };
 
 typedef struct PixelValues {
@@ -779,8 +802,8 @@ static void draw_trace8(OscilloscopeContext *s, AVFrame *frame)
             if ((1 << c) & s->components) {
                 int x = i * s->width / s->nb_values;
                 int px = (i - 1) * s->width / s->nb_values;
-                int py = s->height - s->values[i-1].p[c] * s->height / 256;
-                int y = s->height - s->values[i].p[c] * s->height / 256;
+                int py = s->height - s->values[i-1].p[s->rgba_map[c]] * s->height / 256;
+                int y = s->height - s->values[i].p[s->rgba_map[c]] * s->height / 256;
 
                 draw_line(&s->draw, s->ox + x, s->oy + y, s->ox + px, s->oy + py, frame, s->colors[c]);
             }
@@ -798,8 +821,8 @@ static void draw_trace16(OscilloscopeContext *s, AVFrame *frame)
             if ((1 << c) & s->components) {
                 int x = i * s->width / s->nb_values;
                 int px = (i - 1) * s->width / s->nb_values;
-                int py = s->height - s->values[i-1].p[c] * s->height / s->max;
-                int y = s->height - s->values[i].p[c] * s->height / s->max;
+                int py = s->height - s->values[i-1].p[s->rgba_map[c]] * s->height / s->max;
+                int y = s->height - s->values[i].p[s->rgba_map[c]] * s->height / s->max;
 
                 draw_line(&s->draw, s->ox + x, s->oy + y, s->ox + px, s->oy + py, frame, s->colors[c]);
             }
@@ -973,9 +996,9 @@ static int oscilloscope_filter_frame(AVFilterLink *inlink, AVFrame *frame)
     for (i = 0; i < s->nb_values; i++) {
         for (c = 0; c < s->nb_comps; c++) {
             if ((1 << c) & s->components) {
-                max[c] = FFMAX(max[c], s->values[i].p[c]);
-                min[c] = FFMIN(min[c], s->values[i].p[c]);
-                average[c] += s->values[i].p[c];
+                max[c] = FFMAX(max[c], s->values[i].p[s->rgba_map[c]]);
+                min[c] = FFMIN(min[c], s->values[i].p[s->rgba_map[c]]);
+                average[c] += s->values[i].p[s->rgba_map[c]];
             }
         }
     }
@@ -990,7 +1013,7 @@ static int oscilloscope_filter_frame(AVFilterLink *inlink, AVFrame *frame)
                 const char yuva[4] = { 'Y', 'U', 'V', 'A' };
                 char text[128];
 
-                snprintf(text, sizeof(text), "%c avg:%.1f min:%d max:%d\n", s->is_rgb ? rgba[c] : yuva[c], average[s->rgba_map[c]], min[s->rgba_map[c]], max[s->rgba_map[c]]);
+                snprintf(text, sizeof(text), "%c avg:%.1f min:%d max:%d\n", s->is_rgb ? rgba[c] : yuva[c], average[c], min[c], max[c]);
                 draw_text(&s->draw, frame, &s->white, s->ox +  2 + 280 * i++, s->oy + s->height + 4, text, 0);
             }
         }
@@ -1027,4 +1050,5 @@ AVFilter ff_vf_oscilloscope = {
     .uninit        = oscilloscope_uninit,
     .inputs        = oscilloscope_inputs,
     .outputs       = oscilloscope_outputs,
+    .flags         = AVFILTER_FLAG_SUPPORT_TIMELINE_GENERIC,
 };

@@ -26,13 +26,14 @@
 #include "formats.h"
 #include "internal.h"
 #include "video.h"
-#include "framesync2.h"
+#include "framesync.h"
 
 #define OFFSET(x) offsetof(HysteresisContext, x)
 #define FLAGS AV_OPT_FLAG_FILTERING_PARAM|AV_OPT_FLAG_VIDEO_PARAM
 
 typedef struct HysteresisContext {
     const AVClass *class;
+    FFFrameSync fs;
 
     int planes;
     int threshold;
@@ -40,7 +41,6 @@ typedef struct HysteresisContext {
     int width[4], height[4];
     int nb_planes;
     int depth;
-    FFFrameSync fs;
 
     uint8_t *map;
     uint32_t *xy;
@@ -57,8 +57,6 @@ static const AVOption hysteresis_options[] = {
     { "threshold", "set threshold", OFFSET(threshold), AV_OPT_TYPE_INT, {.i64=0},   0, UINT16_MAX, FLAGS },
     { NULL }
 };
-
-AVFILTER_DEFINE_CLASS(hysteresis);
 
 static int query_formats(AVFilterContext *ctx)
 {
@@ -79,7 +77,7 @@ static int query_formats(AVFilterContext *ctx)
         AV_PIX_FMT_GBRP, AV_PIX_FMT_GBRP9, AV_PIX_FMT_GBRP10,
         AV_PIX_FMT_GBRP12, AV_PIX_FMT_GBRP14, AV_PIX_FMT_GBRP16,
         AV_PIX_FMT_GBRAP, AV_PIX_FMT_GBRAP10, AV_PIX_FMT_GBRAP12, AV_PIX_FMT_GBRAP16,
-        AV_PIX_FMT_GRAY8, AV_PIX_FMT_GRAY9, AV_PIX_FMT_GRAY10, AV_PIX_FMT_GRAY12, AV_PIX_FMT_GRAY16,
+        AV_PIX_FMT_GRAY8, AV_PIX_FMT_GRAY9, AV_PIX_FMT_GRAY10, AV_PIX_FMT_GRAY12, AV_PIX_FMT_GRAY14, AV_PIX_FMT_GRAY16,
         AV_PIX_FMT_NONE
     };
 
@@ -94,8 +92,8 @@ static int process_frame(FFFrameSync *fs)
     AVFrame *out, *base, *alt;
     int ret;
 
-    if ((ret = ff_framesync2_get_frame(&s->fs, 0, &base, 0)) < 0 ||
-        (ret = ff_framesync2_get_frame(&s->fs, 1, &alt,  0)) < 0)
+    if ((ret = ff_framesync_get_frame(&s->fs, 0, &base, 0)) < 0 ||
+        (ret = ff_framesync_get_frame(&s->fs, 1, &alt,  0)) < 0)
         return ret;
 
     if (ctx->is_disabled) {
@@ -301,20 +299,13 @@ static int config_output(AVFilterLink *outlink)
         av_log(ctx, AV_LOG_ERROR, "inputs must be of same pixel format\n");
         return AVERROR(EINVAL);
     }
-    if (base->w                       != alt->w ||
-        base->h                       != alt->h ||
-        base->sample_aspect_ratio.num != alt->sample_aspect_ratio.num ||
-        base->sample_aspect_ratio.den != alt->sample_aspect_ratio.den) {
+    if (base->w != alt->w || base->h != alt->h) {
         av_log(ctx, AV_LOG_ERROR, "First input link %s parameters "
-               "(size %dx%d, SAR %d:%d) do not match the corresponding "
-               "second input link %s parameters (%dx%d, SAR %d:%d)\n",
+               "(size %dx%d) do not match the corresponding "
+               "second input link %s parameters (size %dx%d)\n",
                ctx->input_pads[0].name, base->w, base->h,
-               base->sample_aspect_ratio.num,
-               base->sample_aspect_ratio.den,
                ctx->input_pads[1].name,
-               alt->w, alt->h,
-               alt->sample_aspect_ratio.num,
-               alt->sample_aspect_ratio.den);
+               alt->w, alt->h);
         return AVERROR(EINVAL);
     }
 
@@ -324,7 +315,7 @@ static int config_output(AVFilterLink *outlink)
     outlink->sample_aspect_ratio = base->sample_aspect_ratio;
     outlink->frame_rate = base->frame_rate;
 
-    if ((ret = ff_framesync2_init(&s->fs, ctx, 2)) < 0)
+    if ((ret = ff_framesync_init(&s->fs, ctx, 2)) < 0)
         return ret;
 
     in = s->fs.in;
@@ -339,23 +330,25 @@ static int config_output(AVFilterLink *outlink)
     s->fs.opaque   = s;
     s->fs.on_event = process_frame;
 
-    return ff_framesync2_configure(&s->fs);
+    return ff_framesync_configure(&s->fs);
 }
 
 static int activate(AVFilterContext *ctx)
 {
     HysteresisContext *s = ctx->priv;
-    return ff_framesync2_activate(&s->fs);
+    return ff_framesync_activate(&s->fs);
 }
 
 static av_cold void uninit(AVFilterContext *ctx)
 {
     HysteresisContext *s = ctx->priv;
 
-    ff_framesync2_uninit(&s->fs);
+    ff_framesync_uninit(&s->fs);
     av_freep(&s->map);
     av_freep(&s->xy);
 }
+
+FRAMESYNC_DEFINE_CLASS(hysteresis, HysteresisContext, fs);
 
 static const AVFilterPad hysteresis_inputs[] = {
     {
@@ -382,6 +375,7 @@ static const AVFilterPad hysteresis_outputs[] = {
 AVFilter ff_vf_hysteresis = {
     .name          = "hysteresis",
     .description   = NULL_IF_CONFIG_SMALL("Grow first stream into second stream by connecting components."),
+    .preinit       = hysteresis_framesync_preinit,
     .priv_size     = sizeof(HysteresisContext),
     .uninit        = uninit,
     .query_formats = query_formats,
