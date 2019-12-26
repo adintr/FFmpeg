@@ -18,7 +18,6 @@
 
 #include "libavutil/attributes.h"
 #include "libavutil/common.h"
-#include "libavutil/eval.h"
 #include "libavutil/imgutils.h"
 #include "libavutil/opt.h"
 #include "libavutil/pixdesc.h"
@@ -82,6 +81,7 @@ static int query_formats(AVFilterContext *ctx)
         AV_PIX_FMT_YUV420P16, AV_PIX_FMT_YUV422P16, AV_PIX_FMT_YUV444P16,
         AV_PIX_FMT_YUVA420P9, AV_PIX_FMT_YUVA422P9, AV_PIX_FMT_YUVA444P9,
         AV_PIX_FMT_YUVA420P10, AV_PIX_FMT_YUVA422P10, AV_PIX_FMT_YUVA444P10,
+        AV_PIX_FMT_YUVA422P12, AV_PIX_FMT_YUVA444P12,
         AV_PIX_FMT_YUVA420P16, AV_PIX_FMT_YUVA422P16, AV_PIX_FMT_YUVA444P16,
         AV_PIX_FMT_GBRP, AV_PIX_FMT_GBRP9, AV_PIX_FMT_GBRP10,
         AV_PIX_FMT_GBRP12, AV_PIX_FMT_GBRP14, AV_PIX_FMT_GBRP16,
@@ -138,13 +138,14 @@ static int config_props(AVFilterLink *inlink)
     AVFilterContext *ctx = inlink->dst;
     LimiterContext *s = ctx->priv;
     const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(inlink->format);
-    int vsub, hsub, ret;
+    int depth, vsub, hsub, ret;
 
     s->nb_planes = av_pix_fmt_count_planes(inlink->format);
 
     if ((ret = av_image_fill_linesizes(s->linesize, inlink->format, inlink->w)) < 0)
         return ret;
 
+    depth = desc->comp[0].depth;
     hsub = desc->log2_chroma_w;
     vsub = desc->log2_chroma_h;
     s->height[1] = s->height[2] = AV_CEIL_RSHIFT(inlink->h, vsub);
@@ -152,10 +153,11 @@ static int config_props(AVFilterLink *inlink)
     s->width[1]  = s->width[2]  = AV_CEIL_RSHIFT(inlink->w, hsub);
     s->width[0]  = s->width[3]  = inlink->w;
 
-    if (desc->comp[0].depth == 8) {
+    s->max = FFMIN(s->max, (1 << depth) - 1);
+    s->min = FFMIN(s->min, (1 << depth) - 1);
+
+    if (depth == 8) {
         s->dsp.limiter = limiter8;
-        s->max = FFMIN(s->max, 255);
-        s->min = FFMIN(s->min, 255);
     } else {
         s->dsp.limiter = limiter16;
     }

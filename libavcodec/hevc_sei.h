@@ -52,9 +52,11 @@ typedef enum {
     HEVC_SEI_TYPE_DECODED_PICTURE_HASH                 = 132,
     HEVC_SEI_TYPE_SCALABLE_NESTING                     = 133,
     HEVC_SEI_TYPE_REGION_REFRESH_INFO                  = 134,
+    HEVC_SEI_TYPE_TIME_CODE                            = 136,
     HEVC_SEI_TYPE_MASTERING_DISPLAY_INFO               = 137,
     HEVC_SEI_TYPE_CONTENT_LIGHT_LEVEL_INFO             = 144,
     HEVC_SEI_TYPE_ALTERNATIVE_TRANSFER_CHARACTERISTICS = 147,
+    HEVC_SEI_TYPE_ALPHA_CHANNEL_INFO                   = 165,
 } HEVC_SEI_Type;
 
 typedef struct HEVCSEIPictureHash {
@@ -81,8 +83,7 @@ typedef struct HEVCSEIPictureTiming {
 } HEVCSEIPictureTiming;
 
 typedef struct HEVCSEIA53Caption {
-    int a53_caption_size;
-    uint8_t *a53_caption;
+    AVBufferRef *buf_ref;
 } HEVCSEIA53Caption;
 
 typedef struct HEVCSEIMasteringDisplay {

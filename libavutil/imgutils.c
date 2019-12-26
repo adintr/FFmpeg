@@ -311,8 +311,8 @@ static void image_copy_plane(uint8_t       *dst, ptrdiff_t dst_linesize,
 {
     if (!dst || !src)
         return;
-    av_assert0(abs(src_linesize) >= bytewidth);
-    av_assert0(abs(dst_linesize) >= bytewidth);
+    av_assert0(FFABS(src_linesize) >= bytewidth);
+    av_assert0(FFABS(dst_linesize) >= bytewidth);
     for (;height > 0; height--) {
         memcpy(dst, src, bytewidth);
         dst += dst_linesize;
@@ -519,7 +519,6 @@ static void memset_bytes(uint8_t *dst, size_t dst_size, uint8_t *clear,
 
     if (clear_size == 1) {
         memset(dst, clear[0], dst_size);
-        dst_size = 0;
     } else {
         if (clear_size > dst_size)
             clear_size = dst_size;

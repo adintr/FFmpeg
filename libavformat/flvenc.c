@@ -653,11 +653,9 @@ end:
     return ret;
 }
 
-
-static int flv_write_header(AVFormatContext *s)
+static int flv_init(struct AVFormatContext *s)
 {
     int i;
-    AVIOContext *pb = s->pb;
     FLVContext *flv = s->priv_data;
 
     for (i = 0; i < s->nb_streams; i++) {
@@ -735,6 +733,15 @@ static int flv_write_header(AVFormatContext *s)
     }
 
     flv->delay = AV_NOPTS_VALUE;
+
+    return 0;
+}
+
+static int flv_write_header(AVFormatContext *s)
+{
+    int i;
+    AVIOContext *pb = s->pb;
+    FLVContext *flv = s->priv_data;
 
     avio_write(pb, "FLV", 3);
     avio_w8(pb, 1);
@@ -901,14 +908,10 @@ static int flv_write_packet(AVFormatContext *s, AVPacket *pkt)
         int side_size = 0;
         uint8_t *side = av_packet_get_side_data(pkt, AV_PKT_DATA_NEW_EXTRADATA, &side_size);
         if (side && side_size > 0 && (side_size != par->extradata_size || memcmp(side, par->extradata, side_size))) {
-            av_free(par->extradata);
-            par->extradata = av_mallocz(side_size + AV_INPUT_BUFFER_PADDING_SIZE);
-            if (!par->extradata) {
-                par->extradata_size = 0;
-                return AVERROR(ENOMEM);
-            }
+            ret = ff_alloc_extradata(par, side_size);
+            if (ret < 0)
+                return ret;
             memcpy(par->extradata, side, side_size);
-            par->extradata_size = side_size;
             flv_write_codec_header(s, par, pkt->dts);
         }
     }
@@ -920,6 +923,12 @@ static int flv_write_packet(AVFormatContext *s, AVPacket *pkt)
         av_log(s, AV_LOG_WARNING,
                "Packets are not in the proper order with respect to DTS\n");
         return AVERROR(EINVAL);
+    }
+    if (par->codec_id == AV_CODEC_ID_H264 || par->codec_id == AV_CODEC_ID_MPEG4) {
+        if (pkt->pts == AV_NOPTS_VALUE) {
+            av_log(s, AV_LOG_ERROR, "Packet is missing PTS\n");
+            return AVERROR(EINVAL);
+        }
     }
 
     ts = pkt->dts;
@@ -963,10 +972,10 @@ static int flv_write_packet(AVFormatContext *s, AVPacket *pkt)
     } else if (par->codec_id == AV_CODEC_ID_AAC && pkt->size > 2 &&
                (AV_RB16(pkt->data) & 0xfff0) == 0xfff0) {
         if (!s->streams[pkt->stream_index]->nb_frames) {
-        av_log(s, AV_LOG_ERROR, "Malformed AAC bitstream detected: "
-               "use the audio bitstream filter 'aac_adtstoasc' to fix it "
-               "('-bsf:a aac_adtstoasc' option with ffmpeg)\n");
-        return AVERROR_INVALIDDATA;
+            av_log(s, AV_LOG_ERROR, "Malformed AAC bitstream detected: "
+                   "use the audio bitstream filter 'aac_adtstoasc' to fix it "
+                   "('-bsf:a aac_adtstoasc' option with ffmpeg)\n");
+            return AVERROR_INVALIDDATA;
         }
         av_log(s, AV_LOG_WARNING, "aac bitstream error\n");
     }
@@ -1074,6 +1083,18 @@ static int flv_write_packet(AVFormatContext *s, AVPacket *pkt)
     return pb->error;
 }
 
+static int flv_check_bitstream(struct AVFormatContext *s, const AVPacket *pkt)
+{
+    int ret = 1;
+    AVStream *st = s->streams[pkt->stream_index];
+
+    if (st->codecpar->codec_id == AV_CODEC_ID_AAC) {
+        if (pkt->size > 2 && (AV_RB16(pkt->data) & 0xfff0) == 0xfff0)
+            ret = ff_stream_add_bitstream_filter(st, "aac_adtstoasc", NULL);
+    }
+    return ret;
+}
+
 static const AVOption options[] = {
     { "flvflags", "FLV muxer flags", offsetof(FLVContext, flags), AV_OPT_TYPE_FLAGS, {.i64 = 0}, INT_MIN, INT_MAX, AV_OPT_FLAG_ENCODING_PARAM, "flvflags" },
     { "aac_seq_header_detect", "Put AAC sequence header based on stream data", 0, AV_OPT_TYPE_CONST, {.i64 = FLV_AAC_SEQ_HEADER_DETECT}, INT_MIN, INT_MAX, AV_OPT_FLAG_ENCODING_PARAM, "flvflags" },
@@ -1099,9 +1120,11 @@ AVOutputFormat ff_flv_muxer = {
     .priv_data_size = sizeof(FLVContext),
     .audio_codec    = CONFIG_LIBMP3LAME ? AV_CODEC_ID_MP3 : AV_CODEC_ID_ADPCM_SWF,
     .video_codec    = AV_CODEC_ID_FLV1,
+    .init           = flv_init,
     .write_header   = flv_write_header,
     .write_packet   = flv_write_packet,
     .write_trailer  = flv_write_trailer,
+    .check_bitstream= flv_check_bitstream,
     .codec_tag      = (const AVCodecTag* const []) {
                           flv_video_codec_ids, flv_audio_codec_ids, 0
                       },

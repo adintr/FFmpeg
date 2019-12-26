@@ -60,7 +60,7 @@ typedef struct WVContext {
     int64_t apetag_start;
 } WVContext;
 
-static int wv_probe(AVProbeData *p)
+static int wv_probe(const AVProbeData *p)
 {
     /* check file header */
     if (p->buf_size <= 32)
@@ -159,10 +159,17 @@ static int wv_read_block_header(AVFormatContext *ctx, AVIOContext *pb)
                 case 3:
                     chmask = avio_rl32(pb);
                     break;
+                case 4:
+                    avio_skip(pb, 1);
+                    chan  |= (avio_r8(pb) & 0xF) << 8;
+                    chan  += 1;
+                    chmask = avio_rl24(pb);
+                    break;
                 case 5:
                     avio_skip(pb, 1);
                     chan  |= (avio_r8(pb) & 0xF) << 8;
-                    chmask = avio_rl24(pb);
+                    chan  += 1;
+                    chmask = avio_rl32(pb);
                     break;
                 default:
                     av_log(ctx, AV_LOG_ERROR,
@@ -275,8 +282,8 @@ static int wv_read_packet(AVFormatContext *s, AVPacket *pkt)
     }
 
     pos = wc->pos;
-    if (av_new_packet(pkt, wc->header.blocksize + WV_HEADER_SIZE) < 0)
-        return AVERROR(ENOMEM);
+    if ((ret = av_new_packet(pkt, wc->header.blocksize + WV_HEADER_SIZE)) < 0)
+        return ret;
     memcpy(pkt->data, wc->block_header, WV_HEADER_SIZE);
     ret = avio_read(s->pb, pkt->data + WV_HEADER_SIZE, wc->header.blocksize);
     if (ret != wc->header.blocksize) {

@@ -176,9 +176,11 @@ static int fic_decode_slice(AVCodecContext *avctx, void *tdata)
     int slice_h  = tctx->slice_h;
     int src_size = tctx->src_size;
     int y_off    = tctx->y_off;
-    int x, y, p;
+    int x, y, p, ret;
 
-    init_get_bits(&gb, src, src_size * 8);
+    ret = init_get_bits8(&gb, src, src_size);
+    if (ret < 0)
+        return ret;
 
     for (p = 0; p < 3; p++) {
         int stride   = ctx->frame->linesize[p];
@@ -276,7 +278,7 @@ static int fic_decode_frame(AVCodecContext *avctx, void *data,
     int skip_cursor = ctx->skip_cursor;
     uint8_t *sdata;
 
-    if ((ret = ff_reget_buffer(avctx, ctx->frame)) < 0)
+    if ((ret = ff_reget_buffer(avctx, ctx->frame, 0)) < 0)
         return ret;
 
     /* Header + at least one slice (4) */
@@ -354,7 +356,7 @@ static int fic_decode_frame(AVCodecContext *avctx, void *data,
     sdata = src + tsize + FIC_HEADER_SIZE + 4 * nslices;
     msize = avpkt->size - nslices * 4 - tsize - FIC_HEADER_SIZE;
 
-    if (msize <= 0) {
+    if (msize <= ctx->aligned_width/8 * (ctx->aligned_height/8) / 8) {
         av_log(avctx, AV_LOG_ERROR, "Not enough frame data to decode.\n");
         return AVERROR_INVALIDDATA;
     }
@@ -419,7 +421,7 @@ static int fic_decode_frame(AVCodecContext *avctx, void *data,
     }
 
     /* Make sure we use a user-supplied buffer. */
-    if ((ret = ff_reget_buffer(avctx, ctx->final_frame)) < 0) {
+    if ((ret = ff_reget_buffer(avctx, ctx->final_frame, 0)) < 0) {
         av_log(avctx, AV_LOG_ERROR, "Could not make frame writable.\n");
         return ret;
     }
