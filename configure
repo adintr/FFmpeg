@@ -1149,6 +1149,13 @@ test_ld(){
     test_$type $($cflags_filter $flags) || return
     flags=$($ldflags_filter $flags)
     libs=$($ldflags_filter $libs)
+	log $ld $LDFLAGS $LDEXEFLAGS $flags $(ld_o $TMPE) $TMPO $libs $extralibs
+	log ld $ld
+	log LDFLAGS $LDFLAGS
+	log LDEXEFLAGS $LDEXEFLAGS
+	log flags $flags
+	log lib $libs
+	log extralibs $extralibs
     test_cmd $ld $LDFLAGS $LDEXEFLAGS $flags $(ld_o $TMPE) $TMPO $libs $extralibs
 }
 
@@ -1434,8 +1441,12 @@ test_pkg_config(){
     shift 4
     disable $name
     test_cmd $pkg_config --exists --print-errors $pkg_version || return
+	log "test ok"
+	log $pkg_config --cflags $pkg_config_flags $pkg
     pkg_cflags=$($pkg_config --cflags $pkg_config_flags $pkg)
+	log pkg_cflags
     pkg_libs=$($pkg_config --libs $pkg_config_flags $pkg)
+	log pkg_libs
     check_func_headers "$headers" "$funcs" $pkg_cflags $pkg_libs "$@" &&
         enable $name &&
         set_sanitized "${name}_cflags"    $pkg_cflags &&
