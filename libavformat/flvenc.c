@@ -925,9 +925,9 @@ static int flv_write_packet(AVFormatContext *s, AVPacket *pkt)
             memcpy(par->extradata, side, side_size);
             par->extradata_size = side_size;
             flv_write_codec_header(s, par, pkt->dts);
-        } else {
-            flv_write_codec_header(s, par, pkt->dts);
-        }
+        } //else {
+          //  flv_write_codec_header(s, par, pkt->dts);
+        //}
     }
 
     if (flv->delay == AV_NOPTS_VALUE)
