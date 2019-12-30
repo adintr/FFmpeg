@@ -723,12 +723,17 @@ enable_deep_weak(){
 }
 
 requested(){
+    log test "${1#!}" = "$1" && op="=" || op="!="
     test "${1#!}" = "$1" && op="=" || op="!="
+	log eval test "x\$${1#!}_requested" $op "xyes"
     eval test "x\$${1#!}_requested" $op "xyes"
 }
 
 enabled(){
+	log enabled test "${1#!}" = "$1" && op="=" || op="!="
     test "${1#!}" = "$1" && op="=" || op="!="
+	log eval test "x\$${1#!}" $op "xyes"
+	log "${1#!}"
     eval test "x\$${1#!}" $op "xyes"
 }
 
@@ -6392,9 +6397,12 @@ if enabled gcrypt; then
     fi
 fi
 
+log "*** TEST SDL2 ***"
 if enabled sdl2; then
+	log "*** TEST SDL2 IN ***"
     SDL2_CONFIG="${cross_prefix}sdl2-config"
     test_pkg_config sdl2 "sdl2 >= 2.0.1 sdl2 < 2.1.0" SDL_events.h SDL_PollEvent
+	
     if disabled sdl2 && "${SDL2_CONFIG}" --version > /dev/null 2>&1; then
         sdl2_cflags=$("${SDL2_CONFIG}" --cflags)
         sdl2_extralibs=$("${SDL2_CONFIG}" --libs)
