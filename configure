@@ -7419,7 +7419,7 @@ cat > $TMPH <<EOF
 #define CONFIG_THIS_YEAR 2019
 #define FFMPEG_DATADIR "$(eval c_escape $datadir)"
 #define AVCONV_DATADIR "$(eval c_escape $datadir)"
-#define CC_IDENT "$(c_escape ${cc_ident:-Unknown compiler})"
+#define CC_IDENT "msvc64"
 #define av_restrict $restrict_keyword
 #define EXTERN_PREFIX "${extern_prefix}"
 #define EXTERN_ASM ${extern_prefix}
