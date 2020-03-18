@@ -4891,8 +4891,11 @@ int main(int argc, char **argv)
     }
 
     current_time = ti = get_benchmark_time_stamps();
+	
+	// Main Loop!
     if (transcode() < 0)
         exit_program(1);
+
     if (do_benchmark) {
         int64_t utime, stime, rtime;
         current_time = get_benchmark_time_stamps();
