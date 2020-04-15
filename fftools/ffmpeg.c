@@ -949,10 +949,17 @@ static void do_audio_out(OutputFile *of, OutputStream *ost,
 
         update_benchmark("encode_audio %d.%d", ost->file_index, ost->index);
 
+		if (debug_ts) {
+			av_log(NULL, AV_LOG_INFO, "encoder -> type:audio before scale "
+				"pkt_pts:%s pkt_pts_time:%s pkt_dts:%s pkt_dts_time:%s\n",
+				av_ts2str(pkt.pts), av_ts2timestr(pkt.pts, &enc->time_base),
+				av_ts2str(pkt.dts), av_ts2timestr(pkt.dts, &enc->time_base));
+		}
+
         av_packet_rescale_ts(&pkt, enc->time_base, ost->mux_timebase);
 
         if (debug_ts) {
-            av_log(NULL, AV_LOG_INFO, "encoder -> type:audio "
+            av_log(NULL, AV_LOG_INFO, "encoder -> type:audio after scale "
                    "pkt_pts:%s pkt_pts_time:%s pkt_dts:%s pkt_dts_time:%s\n",
                    av_ts2str(pkt.pts), av_ts2timestr(pkt.pts, &enc->time_base),
                    av_ts2str(pkt.dts), av_ts2timestr(pkt.dts, &enc->time_base));
